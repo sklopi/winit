@@ -104,22 +104,9 @@ impl WindowBuilder {
     }
     
     #[inline]
-    pub fn build_with_handle(mut self, events_loop: &EventsLoop, handle: *mut c_void) -> Result<Window, CreationError> {
-        // building
-
-        // resizing the window to the dimensions of the monitor when fullscreen
-        if self.window.dimensions.is_none() && self.window.monitor.is_some() {
-            self.window.dimensions = Some(self.window.monitor.as_ref().unwrap().get_dimensions())
-        }
-
-        // default dimensions
-        if self.window.dimensions.is_none() {
-            self.window.dimensions = Some((1024, 768));
-        }
-
-        let w = try!(platform::Window2::with_handle(events_loop.events_loop.clone(), handle));
-
-        Ok(Window { window: w })
+    pub fn with_parent(mut self, parent: *mut c_void) -> WindowBuilder {
+        self.window.parent = Some(parent);
+        self
     }
 
     /// Builds the window.
@@ -127,20 +114,26 @@ impl WindowBuilder {
     /// Error should be very rare and only occur in case of permission denied, incompatible system,
     /// out of memory, etc.
     pub fn build(mut self, events_loop: &EventsLoop) -> Result<Window, CreationError> {
-        // resizing the window to the dimensions of the monitor when fullscreen
-        if self.window.dimensions.is_none() && self.window.monitor.is_some() {
-            self.window.dimensions = Some(self.window.monitor.as_ref().unwrap().get_dimensions())
+        match self.window.parent {
+            Some(parent) => {
+                // building with parent
+                let w = try!(platform::Window2::new_with_parent(events_loop.events_loop.clone(), parent));
+                Ok(Window { window: w })
+            },
+            None => {
+                // resizing the window to the dimensions of the monitor when fullscreen
+                if self.window.dimensions.is_none() && self.window.monitor.is_some() {
+                    self.window.dimensions = Some(self.window.monitor.as_ref().unwrap().get_dimensions())
+                }
+
+                // default dimensions
+                if self.window.dimensions.is_none() {
+                    self.window.dimensions = Some((1024, 768));
+                }
+                let w = try!(platform::Window2::new(events_loop.events_loop.clone(), &self.window, &self.platform_specific));
+                Ok(Window { window: w })
+            }
         }
-
-        // default dimensions
-        if self.window.dimensions.is_none() {
-            self.window.dimensions = Some((1024, 768));
-        }
-
-        // building
-        let w = try!(platform::Window2::new(events_loop.events_loop.clone(), &self.window, &self.platform_specific));
-
-        Ok(Window { window: w })
     }
 }
 

@@ -215,11 +215,11 @@ impl WindowExt for Window {
 }
 
 impl Window {
-    pub fn with_handle(events_loop: std::sync::Weak<super::EventsLoop>, handle: *mut libc::c_void) -> Result<Window, CreationError> {
+    pub fn new_with_parent(events_loop: std::sync::Weak<super::EventsLoop>, parent: *mut libc::c_void) -> Result<Window, CreationError> {
 
-        let view = IdRef::new(handle as id);
+        let view = IdRef::new(parent as id);
 
-        let ns_window_ptr: cocoa::base::id = unsafe { msg_send![handle as cocoa::base::id, window] };
+        let ns_window_ptr: cocoa::base::id = unsafe { msg_send![parent as cocoa::base::id, window] };
         let window = IdRef::new(ns_window_ptr as id);
 
         let ds = DelegateState {

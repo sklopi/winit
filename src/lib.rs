@@ -346,6 +346,8 @@ pub struct WindowAttributes {
     /// The default is `None`.
     pub dimensions: Option<(u32, u32)>,
 
+    pub parent: Option<*mut libc::c_void>,
+
     /// The minimum dimensions a window can be, If this is `None`, the window will have no minimum dimensions (aside from reserved).
     ///
     /// The default is `None`.
@@ -394,6 +396,7 @@ impl Default for WindowAttributes {
             dimensions: None,
             min_dimensions: None,
             max_dimensions: None,
+            parent: None,
             monitor: None,
             title: "winit window".to_owned(),
             visible: true,

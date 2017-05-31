@@ -332,21 +332,24 @@ pub unsafe extern "system" fn callback(window: winapi::HWND, msg: winapi::UINT,
             let call_def_window_proc = CONTEXT_STASH.with(|context_stash| {
                 let cstash = context_stash.borrow();
                 let mut call_def_window_proc = false;
-                if let Some(cstash) = cstash.get(&window) {
-                    if let Ok(window_state) = cstash.window_state.lock() {
-                        if cstash.mouse_in_window {
-                            match window_state.cursor_state {
-                                CursorState::Normal => {
-                                    user32::SetCursor(user32::LoadCursorW(
+                match cstash.get(&window) {
+                    None => return false,
+                    Some(cstash) => {
+                        if let Ok(window_state) = cstash.window_state.lock() {
+                            if cstash.mouse_in_window {
+                                match window_state.cursor_state {
+                                    CursorState::Normal => {
+                                        user32::SetCursor(user32::LoadCursorW(
                                             ptr::null_mut(),
                                             window_state.cursor));
-                                },
-                                CursorState::Grab | CursorState::Hide => {
-                                    user32::SetCursor(ptr::null_mut());
+                                    },
+                                    CursorState::Grab | CursorState::Hide => {
+                                        user32::SetCursor(ptr::null_mut());
+                                    }
                                 }
+                            } else {
+                                call_def_window_proc = true;
                             }
-                        } else {
-                            call_def_window_proc = true;
                         }
                     }
                 }
@@ -404,7 +407,7 @@ pub unsafe extern "system" fn callback(window: winapi::HWND, msg: winapi::UINT,
                             None => { }
                         }
                     },
-                    None => { }
+                    None => return
                 }
             });
             0

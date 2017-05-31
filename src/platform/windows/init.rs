@@ -15,6 +15,7 @@ use CreationError;
 use CreationError::OsError;
 use CursorState;
 use WindowAttributes;
+use platform;
 
 use std::ffi::{OsStr};
 use std::os::windows::ffi::OsStrExt;
@@ -24,6 +25,7 @@ use winapi;
 use kernel32;
 use dwmapi;
 use user32;
+use libc;
 
 pub fn new_window(window: &WindowAttributes, pl_attribs: &PlatformSpecificWindowBuilderAttributes) -> Result<Window, CreationError> {
     let window = window.clone();
@@ -31,42 +33,55 @@ pub fn new_window(window: &WindowAttributes, pl_attribs: &PlatformSpecificWindow
     // initializing variables to be sent to the task
 
     let title = OsStr::new(&window.title).encode_wide().chain(Some(0).into_iter())
-                                          .collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     let (tx, rx) = channel();
 
-    // `GetMessage` must be called in the same thread as CreateWindow, so we create a new thread
-    // dedicated to this window.
-    thread::spawn(move || {
+    let window2 = WindowAttributes2::from(window.clone());
+
+    if let Some(parent) = window.parent {
         unsafe {
             // creating and sending the `Window`
-            match init(title, &window, attribs) {
+            match init(title, &window2, pl_attribs.clone(), parent as winapi::HWND) {
                 Ok(w) => tx.send(Ok(w)).ok(),
-                Err(e) => {
-                    tx.send(Err(e)).ok();
-                    return;
-                }
+                Err(e) => tx.send(Err(e)).ok(),
             };
-
-            // now that the `Window` struct is initialized, the main `Window::new()` function will
-            //  return and this events loop will run in parallel
-            loop {
-                let mut msg = mem::uninitialized();
-
-                if user32::GetMessageW(&mut msg, ptr::null_mut(), 0, 0) == 0 {
-                    break;
-                }
-
-                user32::TranslateMessage(&msg);
-                user32::DispatchMessageW(&msg);   // calls `callback` (see the callback module)
-            }
         }
-    });
+    } else {
+        // `GetMessage` must be called in the same thread as CreateWindow, so we create a new thread
+        // dedicated to this window.
+        thread::spawn(move || {
+            unsafe {
+                // creating and sending the `Window`
+                match init(title, &window2, attribs, ptr::null_mut()) {
+                    Ok(w) => tx.send(Ok(w)).ok(),
+                    Err(e) => {
+                        tx.send(Err(e)).ok();
+                        return;
+                    }
+                };
+
+                // now that the `Window` struct is initialized, the main `Window::new()` function will
+                //  return and this events loop will run in parallel
+                loop {
+                    let mut msg = mem::uninitialized();
+
+                    if user32::GetMessageW(&mut msg, ptr::null_mut(), 0, 0) == 0 {
+                        break;
+                    }
+
+                    user32::TranslateMessage(&msg);
+                    user32::DispatchMessageW(&msg);   // calls `callback` (see the callback module)
+                }
+            }
+        });
+    }
+
 
     rx.recv().unwrap()
 }
 
-unsafe fn init(title: Vec<u16>, window: &WindowAttributes, pl_attribs: PlatformSpecificWindowBuilderAttributes) -> Result<Window, CreationError> {
+unsafe fn init(title: Vec<u16>, window: &WindowAttributes2, pl_attribs: PlatformSpecificWindowBuilderAttributes, parent: winapi::HWND) -> Result<Window, CreationError> {
     // registering the window class
     let class_name = register_window_class();
 
@@ -123,6 +138,13 @@ unsafe fn init(title: Vec<u16>, window: &WindowAttributes, pl_attribs: PlatformS
             style | winapi::WS_VISIBLE
         };
 
+        let mut style = if parent.is_null() {
+            style
+        } else {
+            //style | winapi::WS_CHILD
+            winapi::WS_CHILD | winapi::WS_VISIBLE
+        };
+
         if pl_attribs.parent.is_some() {
             style |= winapi::WS_CHILD;
         }
@@ -167,6 +189,19 @@ unsafe fn init(title: Vec<u16>, window: &WindowAttributes, pl_attribs: PlatformS
     if window.monitor.is_some() {
         user32::SetForegroundWindow(real_window.0);
     }
+
+    let window = WindowAttributes {
+        dimensions: window.dimensions,
+        min_dimensions: window.min_dimensions,
+        max_dimensions: window.max_dimensions,
+        monitor: window.monitor.clone(),
+        title: window.title.clone(),
+        visible: window.visible,
+        transparent: window.transparent,
+        decorations: window.decorations,
+        multitouch: window.multitouch,
+        parent: Some((parent as *mut libc::c_void)),
+    };
 
     // Creating a mutex to track the current window state
     let window_state = Arc::new(Mutex::new(WindowState {
@@ -256,4 +291,70 @@ unsafe fn switch_to_fullscreen(rect: &mut winapi::RECT, monitor: &MonitorId)
     }
 
     Ok(())
+}
+
+
+#[derive(Clone)]
+struct WindowAttributes2 {
+    /// The dimensions of the window. If this is `None`, some platform-specific dimensions will be
+    /// used.
+    ///
+    /// The default is `None`.
+    pub dimensions: Option<(u32, u32)>,
+
+    /// The minimum dimensions a window can be, If this is `None`, the window will have no minimum dimensions (aside from reserved).
+    ///
+    /// The default is `None`.
+    pub min_dimensions: Option<(u32, u32)>,
+
+    /// The maximum dimensions a window can be, If this is `None`, the maximum will have no maximum or will be set to the primary monitor's dimensions by the platform.
+    ///
+    /// The default is `None`.
+    pub max_dimensions: Option<(u32, u32)>,
+
+    /// If `Some`, the window will be in fullscreen mode with the given monitor.
+    ///
+    /// The default is `None`.
+    pub monitor: Option<platform::MonitorId>,
+
+    /// The title of the window in the title bar.
+    ///
+    /// The default is `"glutin window"`.
+    pub title: String,
+
+    /// Whether the window should be immediately visible upon creation.
+    ///
+    /// The default is `true`.
+    pub visible: bool,
+
+    /// Whether the the window should be transparent. If this is true, writing colors
+    /// with alpha values different than `1.0` will produce a transparent window.
+    ///
+    /// The default is `false`.
+    pub transparent: bool,
+
+    /// Whether the window should have borders and bars.
+    ///
+    /// The default is `true`.
+    pub decorations: bool,
+
+    /// [iOS only] Enable multitouch, see [UIView#multipleTouchEnabled]
+    /// (https://developer.apple.com/library/ios/documentation/UIKit/Reference/UIView_Class/#//apple_ref/occ/instp/UIView/multipleTouchEnabled)
+    pub multitouch: bool,
+}
+
+impl From<WindowAttributes> for WindowAttributes2{
+    fn from(window: WindowAttributes) -> WindowAttributes2{
+        WindowAttributes2 {
+            dimensions: window.dimensions,
+            min_dimensions: window.min_dimensions,
+            max_dimensions: window.max_dimensions,
+            monitor: window.monitor,
+            title: window.title,
+            visible: window.visible,
+            transparent: window.transparent,
+            decorations: window.decorations,
+            multitouch: window.multitouch,
+        }
+    }
 }

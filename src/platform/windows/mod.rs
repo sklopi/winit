@@ -481,6 +481,9 @@ impl Window2 {
 
 impl Drop for Window2 {
     fn drop(&mut self) {
+        callback::CONTEXT_STASH.with(|context_stash| {
+            (*context_stash.borrow_mut()).remove(&self.window.window.0);
+        });
         if let Some(ev) = self.events_loop.upgrade() {
             let mut windows = ev.windows.lock().unwrap();
             windows.retain(|w| &**w as *const Window != &*self.window as *const _);

@@ -20,6 +20,7 @@ use platform;
 use std::ffi::{OsStr};
 use std::os::windows::ffi::OsStrExt;
 use std::sync::mpsc::channel;
+use std::collections::HashMap;
 
 use winapi;
 use kernel32;
@@ -221,7 +222,7 @@ unsafe fn init(title: Vec<u16>, window: &WindowAttributes2, pl_attribs: Platform
                 window_state: window_state.clone(),
                 mouse_in_window: false
             };
-            (*context_stash.borrow_mut()) = Some(data);
+            (*context_stash.borrow_mut()).insert(real_window.0, data);
         });
         rx
     };
